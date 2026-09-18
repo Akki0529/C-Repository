@@ -162,6 +162,18 @@ if (app.Environment.IsDevelopment())
     var dbContext = scope.ServiceProvider.GetRequiredService<UserServiceContext>();
     await DataSeeder.SeedAsync(dbContext);
 }
+else if (connectionString != "InMemory")
+{
+    // Production: apply any pending EF Core migrations against the real PostgreSQL
+    // database on startup, so a fresh RDS instance gets its schema created
+    // automatically (per milestone-5's "Database schemas created automatically for
+    // all services" acceptance criterion) without a separate manual migration step.
+    // The InMemory provider has no Migrate() support at all, hence the connection
+    // string check — this only runs when a real database is configured.
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<UserServiceContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 // Authentication must appear before Authorization in the pipeline; order matters here.
 app.UseAuthentication();

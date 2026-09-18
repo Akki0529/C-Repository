@@ -187,6 +187,14 @@ if (app.Environment.IsDevelopment())
     var dbContext = scope.ServiceProvider.GetRequiredService<ReservationServiceContext>();
     await DataSeeder.SeedAsync(dbContext);
 }
+else if (connectionString != "InMemory")
+{
+    // Production: apply pending migrations against the real database on startup
+    // (see UserService's Program.cs for the full rationale).
+    using var scope = app.Services.CreateScope();
+    var dbContext = scope.ServiceProvider.GetRequiredService<ReservationServiceContext>();
+    await dbContext.Database.MigrateAsync();
+}
 
 // Order matters: Authentication extracts the identity; Authorization checks it.
 app.UseAuthentication();
