@@ -42,7 +42,7 @@ builder.Services.AddScoped<IValidator<LoginRequest>, LoginRequestValidator>();
 // Sentinel value "InMemory" switches between development (in-process, no install needed)
 // and production (real PostgreSQL). Switch by changing the connection string in config
 // or via ASPNETCORE_ConnectionStrings__DefaultConnection env var.
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = builder.Configuration.GetConnectionString("UserDb");
 if (connectionString == "InMemory")
 {
     builder.Services.AddDbContext<UserServiceContext>(o =>
@@ -151,25 +151,19 @@ builder.Services.Configure<ApiBehaviorOptions>(options =>
 // ── Build & Middleware Pipeline ───────────────────────────────────────────────
 var app = builder.Build();
 
+// Swagger enabled in all environments — production accessibility is an acceptance
+// criterion (milestone-5 verification requires Swagger UI for all services).
+app.UseSwagger();
+app.UseSwaggerUI();
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-
-    // Run the seeder after the app is built but before it starts accepting requests.
-    // CreateScope is needed because DbContext is scoped (not singleton).
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<UserServiceContext>();
     await DataSeeder.SeedAsync(dbContext);
 }
 else if (connectionString != "InMemory")
 {
-    // Production: apply any pending EF Core migrations against the real PostgreSQL
-    // database on startup, so a fresh RDS instance gets its schema created
-    // automatically (per milestone-5's "Database schemas created automatically for
-    // all services" acceptance criterion) without a separate manual migration step.
-    // The InMemory provider has no Migrate() support at all, hence the connection
-    // string check — this only runs when a real database is configured.
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<UserServiceContext>();
     await dbContext.Database.MigrateAsync();
@@ -180,5 +174,24 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Health endpoint: lets EB verify the service started and reached the database.
+// Returns service name, database name, and applied migration count so a single curl
+// proves connectivity end-to-end (nginx → process → RDS).
+app.MapGet("/health", async (UserServiceContext db, IConfiguration config) =>
+{
+    var cs = config.GetConnectionString("UserDb");
+    if (string.IsNullOrEmpty(cs) || cs == "InMemory")
+        return Results.Ok(new { service = "UserService", database = "InMemory", status = "UP" });
+    try
+    {
+        var migrations = await db.Database.GetAppliedMigrationsAsync();
+        return Results.Ok(new { service = "UserService", database = "userservicedb", migrations = migrations.Count(), status = "UP" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { service = "UserService", status = "DOWN", error = ex.Message }, statusCode: 503);
+    }
+});
 
 app.Run();

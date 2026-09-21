@@ -40,7 +40,7 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 // ── Database ──────────────────────────────────────────────────────────────────
-var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = builder.Configuration.GetConnectionString("ReservationDb");
 if (connectionString == "InMemory")
 {
     builder.Services.AddDbContext<ReservationServiceContext>(o =>
@@ -178,19 +178,23 @@ builder.Services.AddHostedService<WaitlistExpiryJob>();
 // ── Build & Middleware Pipeline ───────────────────────────────────────────────
 var app = builder.Build();
 
+// Same UsePathBase rationale as CatalogService — nginx mounts this process at
+// /reservations/ without stripping the prefix.
+if (!app.Environment.IsDevelopment())
+    app.UsePathBase("/reservations");
+
+// Swagger enabled in all environments (milestone-5 acceptance criterion).
+app.UseSwagger();
+app.UseSwaggerUI();
+
 if (app.Environment.IsDevelopment())
 {
-    app.UseSwagger();
-    app.UseSwaggerUI();
-
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ReservationServiceContext>();
     await DataSeeder.SeedAsync(dbContext);
 }
 else if (connectionString != "InMemory")
 {
-    // Production: apply pending migrations against the real database on startup
-    // (see UserService's Program.cs for the full rationale).
     using var scope = app.Services.CreateScope();
     var dbContext = scope.ServiceProvider.GetRequiredService<ReservationServiceContext>();
     await dbContext.Database.MigrateAsync();
@@ -201,5 +205,21 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+app.MapGet("/health", async (ReservationServiceContext db, IConfiguration config) =>
+{
+    var cs = config.GetConnectionString("ReservationDb");
+    if (string.IsNullOrEmpty(cs) || cs == "InMemory")
+        return Results.Ok(new { service = "ReservationService", database = "InMemory", status = "UP" });
+    try
+    {
+        var migrations = await db.Database.GetAppliedMigrationsAsync();
+        return Results.Ok(new { service = "ReservationService", database = "reservationservicedb", migrations = migrations.Count(), status = "UP" });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { service = "ReservationService", status = "DOWN", error = ex.Message }, statusCode: 503);
+    }
+});
 
 app.Run();
