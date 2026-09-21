@@ -1,5 +1,42 @@
 # Digital Library Management System API (.NET Microservices)
 
+## Live Deployment
+
+The system is deployed on AWS Elastic Beanstalk (single environment, three processes) backed by AWS RDS PostgreSQL.
+
+**Base URL:** `http://library-microservices-env.eba-qijg3uh7.us-east-1.elasticbeanstalk.com`
+
+| Service | Health | Swagger UI | API base path |
+|---|---|---|---|
+| User Service | `/health` | `/swagger` | `/api/auth/...`, `/api/users/...` |
+| Catalog Service | `/catalog/health` | `/catalog/swagger` | `/catalog/api/catalog/...` |
+| Reservation Service | `/reservations/health` | `/reservations/swagger` | `/reservations/api/reservations/...` |
+
+### Quick smoke test
+
+```bash
+EB=http://library-microservices-env.eba-qijg3uh7.us-east-1.elasticbeanstalk.com
+
+# Health checks
+curl $EB/health
+curl $EB/catalog/health
+curl $EB/reservations/health
+
+# Browse catalog (no auth required)
+curl $EB/catalog/api/catalog/books
+
+# Register and login
+curl -X POST $EB/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"Test123!@#","firstName":"First","lastName":"Last","phoneNumber":"+1-555-0100"}'
+
+curl -X POST $EB/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"you@example.com","password":"Test123!@#"}'
+```
+
+---
+
 ## Business Context
 
 ### Overview
